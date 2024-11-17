@@ -1,9 +1,4 @@
-use std::{
-    fs::File,
-    io::Cursor,
-    os::fd::{FromRawFd, IntoRawFd, OwnedFd},
-    sync::{Arc, Mutex},
-};
+use std::os::fd::{IntoRawFd, OwnedFd};
 
 use ashpd::desktop::{
     screencast::{CursorMode, Screencast, SourceType, Stream as AshStream},
@@ -41,7 +36,7 @@ async fn open_portal() -> ashpd::Result<(AshStream, OwnedFd)> {
     Ok((stream, fd))
 }
 
-async fn start_streaming(node_id: u32, fd: OwnedFd) -> Result<(), pw::Error> {
+async fn start_streaming(node_id: u32, _fd: OwnedFd) -> Result<(), pw::Error> {
     pw::init();
 
     let mainloop = pw::main_loop::MainLoop::new(None)?;
@@ -128,7 +123,7 @@ async fn start_streaming(node_id: u32, fd: OwnedFd) -> Result<(), pw::Error> {
                     }
 
                     // copy frame data to screen
-                    let data = &mut datas[0];
+                    let _data = &mut datas[0];
                     // println!("got a frame of size {}", data.chunk().size());
                 }
             }
@@ -223,6 +218,8 @@ smol_macros::main! {
         let (stream, fd) = open_portal().await.expect("failed to open portal");
         println!("node id {}, fd {}", stream.pipe_wire_node_id(), fd.try_clone().unwrap().into_raw_fd());
 
-        start_streaming(stream.pipe_wire_node_id(), fd).await;
+        if let Err(e) = start_streaming(stream.pipe_wire_node_id(), fd).await {
+            eprintln!("Error: {}", e);
+        };
     }
 }
