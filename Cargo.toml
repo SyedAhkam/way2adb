@@ -1,0 +1,9 @@
+[package]
+name = "way2adb-server"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+ashpd = { version = "0.10.2", default-features = false, features = ["async-std", "pipewire"] }
+pipewire = "0.8.0"
+smol-macros = "0.1.1"
