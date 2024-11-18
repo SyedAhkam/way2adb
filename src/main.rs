@@ -4,7 +4,7 @@ use ashpd::desktop::{
     screencast::{CursorMode, Screencast, SourceType, Stream as AshStream},
     PersistMode,
 };
-use pipewire as pw;
+use pipewire::{self as pw, spa::param::video::VideoFormat};
 use pw::{properties::properties, spa};
 
 use spa::pod::Pod;
@@ -113,7 +113,7 @@ async fn start_streaming(node_id: u32, _fd: OwnedFd) -> Result<(), pw::Error> {
 
             // prepare to render video of this size
         })
-        .process(|stream, _| {
+        .process(|stream, user_data| {
             match stream.dequeue_buffer() {
                 None => println!("out of buffers"),
                 Some(mut buffer) => {
@@ -123,8 +123,30 @@ async fn start_streaming(node_id: u32, _fd: OwnedFd) -> Result<(), pw::Error> {
                     }
 
                     // copy frame data to screen
-                    let _data = &mut datas[0];
-                    // println!("got a frame of size {}", data.chunk().size());
+                    let data = &mut datas[0];
+                    let chunk = data.chunk();
+                    println!("got a frame of size {}", chunk.size());
+
+                    let raw_data = match data.data() {
+                        Some(data) => data,
+                        None => return,
+                    };
+
+                    if user_data.format.format() != VideoFormat::BGRx {
+                        eprintln!("unsupported pixel format: {:?}", user_data.format.format());
+                        return;
+                    };
+
+                    let rgb_data: Vec<u8> = raw_data
+                        .chunks(4)
+                        .flat_map(|bgrx| vec![bgrx[2], bgrx[1], bgrx[0]]) // BGR -> RGB, skip x
+                        .collect();
+                    if rgb_data.is_empty() {
+                        return;
+                    };
+
+                    let size = user_data.format.size();
+                    // work with rgb_data
                 }
             }
         })
