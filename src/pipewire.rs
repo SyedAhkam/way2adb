@@ -96,7 +96,7 @@ pub async fn start_streaming(node_id: u32, _fd: OwnedFd) -> Result<(), pw::Error
                     // copy frame data to screen
                     let data = &mut datas[0];
                     let chunk = data.chunk();
-                    println!("got a frame of size {}", chunk.size());
+                    // println!("got a frame of size {}", chunk.size());
 
                     let raw_data = match data.data() {
                         Some(data) => data,

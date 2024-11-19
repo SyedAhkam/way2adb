@@ -1,7 +1,10 @@
 use std::os::fd::IntoRawFd;
 
+use tokio::join;
+
 mod pipewire;
 mod portal;
+mod server;
 
 #[tokio::main]
 async fn main() {
@@ -12,7 +15,16 @@ async fn main() {
         fd.try_clone().unwrap().into_raw_fd()
     );
 
-    if let Err(e) = pipewire::start_streaming(stream.pipe_wire_node_id(), fd).await {
-        eprintln!("Error: {}", e);
-    };
+    let server_task = tokio::task::spawn(async {
+        server::start_server().await.unwrap();
+    });
+
+    let streamer_task = tokio::task::spawn(async move {
+        pipewire::start_streaming(stream.pipe_wire_node_id(), fd)
+            .await
+            .unwrap();
+    });
+
+    // FIXME: use try_join!
+    let (_, _) = tokio::join!(server_task, streamer_task);
 }
