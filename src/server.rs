@@ -4,6 +4,8 @@ use tokio::{
     sync::{broadcast, mpsc},
 };
 
+use crate::message::StreamMessage;
+
 async fn process_socket(
     mut socket: TcpStream,
     mut rx: broadcast::Receiver<String>,
@@ -34,7 +36,7 @@ async fn process_socket(
 }
 
 // FIXME: migrate to a udp implementation later
-pub async fn start_server(mut rx_stream: mpsc::Receiver<String>) -> std::io::Result<()> {
+pub async fn start_server(mut rx_stream: mpsc::Receiver<StreamMessage>) -> std::io::Result<()> {
     println!("Starting TCP server..");
 
     let listener = TcpListener::bind("127.0.0.1:8080").await?;
@@ -43,9 +45,9 @@ pub async fn start_server(mut rx_stream: mpsc::Receiver<String>) -> std::io::Res
     let tx_cloned = tx.clone();
     tokio::spawn(async move {
         while let Some(msg) = rx_stream.recv().await {
-            println!("got msg from streamer: {}", msg);
+            println!("Message from streamer: {:?}", msg);
             if tx_cloned.receiver_count() > 0 {
-                tx_cloned.send(msg.into()).unwrap();
+                tx_cloned.send("".into()).unwrap();
             }
         }
     });

@@ -4,15 +4,17 @@ use pipewire::{self as pw, spa::param::video::VideoFormat};
 use pw::{properties::properties, spa, spa::pod::Pod};
 use tokio::sync::mpsc;
 
+use crate::message::StreamMessage;
+
 struct UserData {
     format: spa::param::video::VideoInfoRaw,
-    tx: mpsc::Sender<String>,
+    tx: mpsc::Sender<StreamMessage>,
 }
 
 pub async fn start_streaming(
     node_id: u32,
     fd: OwnedFd,
-    tx: mpsc::Sender<String>,
+    tx: mpsc::Sender<StreamMessage>,
 ) -> Result<(), pw::Error> {
     pw::init();
 
@@ -92,7 +94,7 @@ pub async fn start_streaming(
             let tx_cloned = user_data.tx.clone();
             tokio::spawn(async move {
                 tokio::time::sleep(tokio::time::Duration::from_millis(1000)); // gotta wait for server to be ready
-                tx_cloned.send("stream connected".into()).await.unwrap();
+                tx_cloned.send(StreamMessage::Connected).await.unwrap();
             });
 
             // prepare to render video of this size
@@ -134,7 +136,10 @@ pub async fn start_streaming(
 
                     let tx_cloned = user_data.tx.clone();
                     tokio::spawn(async move {
-                        tx_cloned.send("oii".into()).await.unwrap();
+                        tx_cloned
+                            .send(StreamMessage::Frame((vec![0])))
+                            .await
+                            .unwrap();
                     });
                 }
             }
