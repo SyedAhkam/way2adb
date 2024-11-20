@@ -2,12 +2,18 @@ use std::os::fd::OwnedFd;
 
 use pipewire::{self as pw, spa::param::video::VideoFormat};
 use pw::{properties::properties, spa, spa::pod::Pod};
+use tokio::sync::mpsc;
 
 struct UserData {
     format: spa::param::video::VideoInfoRaw,
+    tx: mpsc::Sender<String>,
 }
 
-pub async fn start_streaming(node_id: u32, fd: OwnedFd) -> Result<(), pw::Error> {
+pub async fn start_streaming(
+    node_id: u32,
+    fd: OwnedFd,
+    tx: mpsc::Sender<String>,
+) -> Result<(), pw::Error> {
     pw::init();
 
     let mainloop = pw::main_loop::MainLoop::new(None)?;
@@ -16,6 +22,7 @@ pub async fn start_streaming(node_id: u32, fd: OwnedFd) -> Result<(), pw::Error>
 
     let data = UserData {
         format: Default::default(),
+        tx,
     };
 
     let stream = pw::stream::Stream::new(
@@ -82,6 +89,12 @@ pub async fn start_streaming(node_id: u32, fd: OwnedFd) -> Result<(), pw::Error>
                 user_data.format.framerate().denom
             );
 
+            let tx_cloned = user_data.tx.clone();
+            tokio::spawn(async move {
+                tokio::time::sleep(tokio::time::Duration::from_millis(1000)); // gotta wait for server to be ready
+                tx_cloned.send("stream connected".into()).await.unwrap();
+            });
+
             // prepare to render video of this size
         })
         .process(|stream, user_data| {
@@ -118,6 +131,11 @@ pub async fn start_streaming(node_id: u32, fd: OwnedFd) -> Result<(), pw::Error>
 
                     let size = user_data.format.size();
                     // work with rgb_data
+
+                    let tx_cloned = user_data.tx.clone();
+                    tokio::spawn(async move {
+                        tx_cloned.send("oii".into()).await.unwrap();
+                    });
                 }
             }
         })

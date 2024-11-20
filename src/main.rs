@@ -1,6 +1,6 @@
 use std::os::fd::IntoRawFd;
 
-use tokio::join;
+use tokio::{join, sync::mpsc};
 
 mod pipewire;
 mod portal;
@@ -15,12 +15,14 @@ async fn main() {
         fd.try_clone().unwrap().into_raw_fd()
     );
 
+    let (tx, rx) = mpsc::channel::<String>(16);
+
     let server_task = tokio::task::spawn(async {
-        server::start_server().await.unwrap();
+        server::start_server(rx).await.unwrap();
     });
 
     let streamer_task = tokio::task::spawn(async move {
-        pipewire::start_streaming(stream.pipe_wire_node_id(), fd)
+        pipewire::start_streaming(stream.pipe_wire_node_id(), fd, tx)
             .await
             .unwrap();
     });

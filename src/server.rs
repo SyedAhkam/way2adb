@@ -1,7 +1,7 @@
 use tokio::{
     io::{AsyncReadExt, AsyncWriteExt},
     net::{TcpListener, TcpStream},
-    sync::broadcast,
+    sync::{broadcast, mpsc},
 };
 
 async fn process_socket(
@@ -14,7 +14,7 @@ async fn process_socket(
 
     let reader_task = tokio::spawn(async move {
         while let Ok(msg) = rx.recv().await {
-            println!("got msg");
+            println!("{}", msg);
         }
     });
 
@@ -34,7 +34,7 @@ async fn process_socket(
 }
 
 // FIXME: migrate to a udp implementation later
-pub async fn start_server() -> std::io::Result<()> {
+pub async fn start_server(mut rx_stream: mpsc::Receiver<String>) -> std::io::Result<()> {
     println!("Starting TCP server..");
 
     let listener = TcpListener::bind("127.0.0.1:8080").await?;
@@ -42,11 +42,11 @@ pub async fn start_server() -> std::io::Result<()> {
 
     let tx_cloned = tx.clone();
     tokio::spawn(async move {
-        loop {
+        while let Some(msg) = rx_stream.recv().await {
+            println!("got msg from streamer: {}", msg);
             if tx_cloned.receiver_count() > 0 {
-                tx_cloned.send("Hello".into()).unwrap();
+                tx_cloned.send(msg.into()).unwrap();
             }
-            tokio::time::sleep(tokio::time::Duration::from_secs(1)).await; // Add a delay
         }
     });
 
