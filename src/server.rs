@@ -1,10 +1,15 @@
+use std::net::SocketAddr;
+
 use tokio::{
     io::{AsyncReadExt, AsyncWriteExt},
     net::{TcpListener, TcpStream},
     sync::{broadcast, mpsc},
 };
 
-use crate::message::{StreamMessage, TcpMessage};
+use crate::{
+    message::{StreamMessage, TcpMessage},
+    TCP_PORT,
+};
 
 async fn process_socket(
     mut socket: TcpStream,
@@ -42,7 +47,9 @@ async fn process_socket(
 pub async fn start_server(mut rx_stream: mpsc::Receiver<StreamMessage>) -> std::io::Result<()> {
     println!("Starting TCP server..");
 
-    let listener = TcpListener::bind("127.0.0.1:8080").await?;
+    let addr = SocketAddr::new("127.0.0.1".parse().unwrap(), TCP_PORT);
+    let listener = TcpListener::bind(addr).await?;
+
     let (tx, _) = broadcast::channel::<TcpMessage>(32);
 
     let tx_cloned = tx.clone();
