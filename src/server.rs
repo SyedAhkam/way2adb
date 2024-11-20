@@ -14,15 +14,18 @@ async fn process_socket(
 
     socket.write_all(b"welcome :)\n").await?;
 
+    let (mut socket_r, mut socket_w) = socket.into_split();
     let reader_task = tokio::spawn(async move {
         while let Ok(msg) = rx.recv().await {
-            println!("{:?}", msg);
+            let TcpMessage::Frame(frame_bytes) = msg; // expecting only one type of message
+
+            socket_w.write_all(&frame_bytes).await;
         }
     });
 
     let mut buf = [0; 1024];
     loop {
-        let n = socket.read(&mut buf).await?;
+        let n = socket_r.read(&mut buf).await?;
         if n == 0 {
             break;
         }
@@ -48,8 +51,8 @@ pub async fn start_server(mut rx_stream: mpsc::Receiver<StreamMessage>) -> std::
             println!("Message from streamer: {:?}", msg);
             if tx_cloned.receiver_count() > 0 {
                 match msg {
-                    StreamMessage::Connected => tx_cloned.send(TcpMessage::Connected),
                     StreamMessage::Frame(v) => tx_cloned.send(TcpMessage::Frame(v)),
+                    StreamMessage::Connected => Ok(0), // TODO
                 }
                 .unwrap();
             }

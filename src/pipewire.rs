@@ -132,12 +132,11 @@ pub async fn start_streaming(
                     };
 
                     let size = user_data.format.size();
-                    // work with rgb_data
 
                     let tx_cloned = user_data.tx.clone();
                     tokio::spawn(async move {
                         tx_cloned
-                            .send(StreamMessage::Frame((vec![0])))
+                            .send(StreamMessage::Frame((rgb_data)))
                             .await
                             .unwrap();
                     });
