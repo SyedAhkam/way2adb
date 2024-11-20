@@ -7,12 +7,12 @@ struct UserData {
     format: spa::param::video::VideoInfoRaw,
 }
 
-pub async fn start_streaming(node_id: u32, _fd: OwnedFd) -> Result<(), pw::Error> {
+pub async fn start_streaming(node_id: u32, fd: OwnedFd) -> Result<(), pw::Error> {
     pw::init();
 
     let mainloop = pw::main_loop::MainLoop::new(None)?;
     let context = pw::context::Context::new(&mainloop)?;
-    let core = context.connect(None)?;
+    let core = context.connect_fd(fd, None)?;
 
     let data = UserData {
         format: Default::default(),
