@@ -4,11 +4,11 @@ use tokio::{
     sync::{broadcast, mpsc},
 };
 
-use crate::message::StreamMessage;
+use crate::message::{StreamMessage, TcpMessage};
 
 async fn process_socket(
     mut socket: TcpStream,
-    mut rx: broadcast::Receiver<String>,
+    mut rx: broadcast::Receiver<TcpMessage>,
 ) -> std::io::Result<()> {
     println!("New connection");
 
@@ -16,7 +16,7 @@ async fn process_socket(
 
     let reader_task = tokio::spawn(async move {
         while let Ok(msg) = rx.recv().await {
-            println!("{}", msg);
+            println!("{:?}", msg);
         }
     });
 
@@ -40,14 +40,18 @@ pub async fn start_server(mut rx_stream: mpsc::Receiver<StreamMessage>) -> std::
     println!("Starting TCP server..");
 
     let listener = TcpListener::bind("127.0.0.1:8080").await?;
-    let (tx, _) = broadcast::channel(32);
+    let (tx, _) = broadcast::channel::<TcpMessage>(32);
 
     let tx_cloned = tx.clone();
     tokio::spawn(async move {
         while let Some(msg) = rx_stream.recv().await {
             println!("Message from streamer: {:?}", msg);
             if tx_cloned.receiver_count() > 0 {
-                tx_cloned.send("".into()).unwrap();
+                match msg {
+                    StreamMessage::Connected => tx_cloned.send(TcpMessage::Connected),
+                    StreamMessage::Frame(v) => tx_cloned.send(TcpMessage::Frame(v)),
+                }
+                .unwrap();
             }
         }
     });
