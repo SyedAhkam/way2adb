@@ -25,6 +25,7 @@ async fn main() {
             .unwrap();
     });
 
-    // FIXME: use try_join!
-    let (_, _) = tokio::join!(server_task, streamer_task);
+    if let Err(e) = tokio::try_join!(server_task, streamer_task) {
+        eprintln!("an error occurred: {}", e);
+    }
 }
