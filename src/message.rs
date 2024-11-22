@@ -1,13 +1,17 @@
 pub enum StreamMessage {
-    Connected,
-    Frame(Vec<u8>),
+    Ready,
+    Header(Vec<u8>),
+    Frame { count: u64, data: Vec<u8> },
 }
 
 impl std::fmt::Debug for StreamMessage {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Self::Connected => write!(f, "Connected"),
-            Self::Frame(v) => write!(f, "{}", format!("Frame[{}]", v.len())),
+            Self::Ready => write!(f, "Ready"),
+            Self::Frame { count, data } => {
+                write!(f, "{}", format!("Frame[{}]({})", data.len(), count))
+            }
+            Self::Header(v) => write!(f, "{}", format!("Header[{}]", v.len())),
         }
     }
 }

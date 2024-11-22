@@ -55,11 +55,13 @@ pub async fn start_server(mut rx_stream: mpsc::Receiver<StreamMessage>) -> std::
     let tx_cloned = tx.clone();
     tokio::spawn(async move {
         while let Some(msg) = rx_stream.recv().await {
-            println!("Message from streamer: {:?}", msg);
+            println!("Message from Streamer: {:?}", msg);
+
             if tx_cloned.receiver_count() > 0 {
                 match msg {
-                    StreamMessage::Frame(v) => tx_cloned.send(TcpMessage::Frame(v)),
-                    StreamMessage::Connected => Ok(0), // TODO
+                    StreamMessage::Ready => Ok(0), // TODO
+                    StreamMessage::Header(v) => Ok(0),
+                    StreamMessage::Frame { data, .. } => tx_cloned.send(TcpMessage::Frame(data)),
                 }
                 .unwrap();
             }

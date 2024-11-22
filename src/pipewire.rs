@@ -1,14 +1,20 @@
-use std::os::fd::OwnedFd;
+use std::{
+    io::{Cursor, Read, Write},
+    os::fd::OwnedFd,
+};
 
 use pipewire::{self as pw, spa::param::video::VideoFormat};
 use pw::{properties::properties, spa, spa::pod::Pod};
 use tokio::sync::mpsc;
+use x264::{Colorspace, Encoder, Image};
 
 use crate::message::StreamMessage;
 
 struct UserData {
     format: spa::param::video::VideoInfoRaw,
     tx: mpsc::Sender<StreamMessage>,
+    encoder: Option<Encoder>,
+    frame: u64,
 }
 
 pub async fn start_streaming(
@@ -25,6 +31,8 @@ pub async fn start_streaming(
     let data = UserData {
         format: Default::default(),
         tx,
+        encoder: None,
+        frame: 0,
     };
 
     let stream = pw::stream::Stream::new(
@@ -36,13 +44,6 @@ pub async fn start_streaming(
             *pw::keys::MEDIA_ROLE => "Screen",
         },
     )?;
-
-    /*let stream = pw::stream::Stream::<UserData>::with_user_data(
-        &mainloop,
-        "video-test",
-        ,
-        data,
-    )*/
 
     let _listener = stream
         .add_local_listener_with_user_data(data)
@@ -75,29 +76,53 @@ pub async fn start_streaming(
                 .expect("Failed to parse param changed to VideoInfoRaw");
 
             println!("got video format:");
+            let video_format = user_data.format;
             println!(
                 "  format: {} ({:?})",
-                user_data.format.format().as_raw(),
-                user_data.format.format()
+                video_format.format().as_raw(),
+                video_format.format()
             );
             println!(
                 "  size: {}x{}",
-                user_data.format.size().width,
-                user_data.format.size().height
+                video_format.size().width,
+                video_format.size().height
             );
             println!(
                 "  framerate: {}/{}",
-                user_data.format.framerate().num,
-                user_data.format.framerate().denom
+                video_format.framerate().num,
+                video_format.framerate().denom
             );
 
+            // Initialize the encoder
+            let mut enc = Encoder::builder()
+                .fps(30, 1)
+                // .baseline()
+                // FIXME: hardcoded colorspace
+                .build(
+                    Colorspace::BGR,
+                    video_format.size().width.try_into().unwrap(),
+                    video_format.size().height.try_into().unwrap(),
+                )
+                .unwrap();
+
+            // Gen headers
+            let headers = enc.headers().unwrap();
+            let headers_data = Vec::from(headers.entirety());
+
+            // Assign into UserData
+            user_data.encoder = Some(enc);
+
+            // Init message
             let tx_cloned = user_data.tx.clone();
             tokio::spawn(async move {
                 tokio::time::sleep(tokio::time::Duration::from_millis(1000)); // gotta wait for server to be ready
-                tx_cloned.send(StreamMessage::Connected).await.unwrap();
-            });
 
-            // prepare to render video of this size
+                tx_cloned.send(StreamMessage::Ready).await.unwrap();
+                tx_cloned
+                    .send(StreamMessage::Header(headers_data))
+                    .await
+                    .unwrap();
+            });
         })
         .process(|stream, user_data| {
             match stream.dequeue_buffer() {
@@ -123,20 +148,32 @@ pub async fn start_streaming(
                         return;
                     };
 
-                    let rgb_data: Vec<u8> = raw_data
-                        .chunks(4)
-                        .flat_map(|bgrx| vec![bgrx[2], bgrx[1], bgrx[0]]) // BGR -> RGB, skip x
-                        .collect();
-                    if rgb_data.is_empty() {
-                        return;
-                    };
+                    let bgr_data = raw_data
+                        .chunks_exact(4)
+                        .flat_map(|chunk| [chunk[0], chunk[1], chunk[2]]) // Drop x
+                        .collect::<Vec<_>>();
 
-                    let size = user_data.format.size();
+                    // Encode frame
+                    let encoder = user_data.encoder.as_mut().expect("encoder unavailable");
 
+                    let image = Image::bgr(encoder.width(), encoder.height(), &bgr_data); // faking the x part as alpha channel because BGRx isn't supported by x264
+                    let (encoded_data, _) = encoder
+                        .encode(user_data.frame.try_into().unwrap(), image)
+                        .unwrap();
+                    let encoded_data_vec = Vec::from(encoded_data.entirety());
+
+                    // Update frame counter
+                    user_data.frame += 1;
+
+                    // Send frame to server
                     let tx_cloned = user_data.tx.clone();
+                    let frame_cloned = user_data.frame.clone();
                     tokio::spawn(async move {
                         tx_cloned
-                            .send(StreamMessage::Frame((rgb_data)))
+                            .send(StreamMessage::Frame {
+                                count: frame_cloned,
+                                data: encoded_data_vec,
+                            })
                             .await
                             .unwrap();
                     });
@@ -196,7 +233,7 @@ pub async fn start_streaming(
             Choice,
             Range,
             Fraction,
-            pw::spa::utils::Fraction { num: 25, denom: 1 },
+            pw::spa::utils::Fraction { num: 30, denom: 1 },
             pw::spa::utils::Fraction { num: 0, denom: 1 },
             pw::spa::utils::Fraction {
                 num: 1000,

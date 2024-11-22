@@ -17,6 +17,7 @@ mkShell.override
       llvmPackages.libclang
       pipewire
       clang-tools
+      x264
     ];
     LD_LIBRARY_PATH = lib.makeLibraryPath buildInputs;
   }
