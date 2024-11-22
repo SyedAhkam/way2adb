@@ -24,5 +24,6 @@ mkShell rec {
   buildInputs = [
     androidComposition.androidsdk
     jdk17
+    kotlin-language-server
   ];
 }

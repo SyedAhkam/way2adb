@@ -9,7 +9,7 @@ android {
 
     defaultConfig {
         applicationId "world.syed.way2adb_client"
-        minSdk 24 
+        minSdk 24
         targetSdk 33
         versionCode 1
         versionName "1.0"
