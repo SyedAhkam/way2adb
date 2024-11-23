@@ -14,7 +14,6 @@ struct UserData {
     format: spa::param::video::VideoInfoRaw,
     tx: mpsc::Sender<StreamMessage>,
     encoder: Option<VideoEncoder>,
-    frame: u64,
 }
 
 fn process_frame(stream: &StreamRef, user_data: &mut UserData) {
@@ -41,21 +40,19 @@ fn process_frame(stream: &StreamRef, user_data: &mut UserData) {
                 return;
             };
 
-            // Encode frame
+            // Get encoder
             let mut encoder = user_data.encoder.as_mut().expect("encoder unavailable");
 
+            // Encode the frame
             let encoded_data = encoder.encode(raw_data).expect("failed to encode frame");
-
-            // Update frame counter
-            user_data.frame += 1;
 
             // Send frame to server
             let tx_cloned = user_data.tx.clone();
-            let frame_cloned = user_data.frame.clone();
+            let frame_count = encoder.get_frame();
             tokio::spawn(async move {
                 tx_cloned
                     .send(StreamMessage::Frame {
-                        count: frame_cloned,
+                        count: frame_count,
                         data: encoded_data,
                     })
                     .await
@@ -107,11 +104,8 @@ fn param_changed(_: &StreamRef, user_data: &mut UserData, id: u32, param: Option
         video_format.framerate().denom
     );
 
-    let enc = VideoEncoder::new(video_format.size().width, video_format.size().height, 30)
+    let mut enc = VideoEncoder::new(video_format.size().width, video_format.size().height, 30)
         .expect("failed to init video encoder");
-
-    // Gen headers
-    let headers_data = enc.headers();
 
     // Assign into UserData
     user_data.encoder = Some(enc);
@@ -122,10 +116,6 @@ fn param_changed(_: &StreamRef, user_data: &mut UserData, id: u32, param: Option
         tokio::time::sleep(tokio::time::Duration::from_millis(1000)); // gotta wait for server to be ready
 
         tx_cloned.send(StreamMessage::Ready).await.unwrap();
-        tx_cloned
-            .send(StreamMessage::Header(headers_data))
-            .await
-            .unwrap();
     });
 }
 
@@ -144,7 +134,6 @@ pub async fn start_streaming(
         format: Default::default(),
         tx,
         encoder: None,
-        frame: 0,
     };
 
     let stream = pw::stream::Stream::new(

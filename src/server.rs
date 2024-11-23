@@ -60,7 +60,6 @@ pub async fn start_server(mut rx_stream: mpsc::Receiver<StreamMessage>) -> std::
             if tx_cloned.receiver_count() > 0 {
                 match msg {
                     StreamMessage::Ready => Ok(0), // TODO
-                    StreamMessage::Header(v) => Ok(0),
                     StreamMessage::Frame { data, .. } => tx_cloned.send(TcpMessage::Frame(data)),
                 }
                 .unwrap();

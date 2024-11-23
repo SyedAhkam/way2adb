@@ -18,6 +18,7 @@ mkShell.override
       pipewire
       clang-tools
       x264
+      ffmpeg
     ];
     LD_LIBRARY_PATH = lib.makeLibraryPath buildInputs;
   }

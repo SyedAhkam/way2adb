@@ -1,5 +1,9 @@
 use ffmpeg_next::{
-    self as ffmpeg, codec, encoder, format, frame, software::scaling, Dictionary, Packet,
+    self as ffmpeg,
+    codec::{self, traits::Encoder},
+    encoder, format, frame,
+    software::scaling,
+    Dictionary, Packet,
 };
 
 pub struct VideoEncoder {
@@ -22,7 +26,7 @@ impl VideoEncoder {
         encoder.set_height(height);
         encoder.set_time_base((1, fps.try_into()?));
         encoder.set_format(format::Pixel::YUV420P);
-        encoder.set_flags(codec::Flags::GLOBAL_HEADER);
+        // encoder.set_flags(codec::Flags::GLOBAL_HEADER);
 
         let mut opts = Dictionary::new();
         opts.set("preset", "medium");
@@ -48,10 +52,6 @@ impl VideoEncoder {
             scaler,
             frame: 0,
         })
-    }
-
-    pub fn headers(&self) -> Vec<u8> {
-        vec![]
     }
 
     fn scale(
@@ -87,5 +87,9 @@ impl VideoEncoder {
         }
 
         Ok(encoded_packets)
+    }
+
+    pub fn get_frame(&self) -> usize {
+        self.frame
     }
 }

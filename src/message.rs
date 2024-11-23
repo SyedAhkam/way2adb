@@ -1,7 +1,6 @@
 pub enum StreamMessage {
     Ready,
-    Header(Vec<u8>),
-    Frame { count: u64, data: Vec<u8> },
+    Frame { count: usize, data: Vec<u8> },
 }
 
 impl std::fmt::Debug for StreamMessage {
@@ -11,7 +10,6 @@ impl std::fmt::Debug for StreamMessage {
             Self::Frame { count, data } => {
                 write!(f, "{}", format!("Frame[{}]({})", data.len(), count))
             }
-            Self::Header(v) => write!(f, "{}", format!("Header[{}]", v.len())),
         }
     }
 }
