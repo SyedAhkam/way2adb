@@ -3,21 +3,21 @@ use std::{
     os::fd::OwnedFd,
 };
 
-use pipewire::{self as pw, spa::param::video::VideoFormat};
+use pipewire::{self as pw, spa::param::video::VideoFormat, stream::StreamRef};
 use pw::{properties::properties, spa, spa::pod::Pod};
 use tokio::sync::mpsc;
-use x264::{Colorspace, Encoder, Image};
 
+use crate::encoder::VideoEncoder;
 use crate::message::StreamMessage;
 
 struct UserData {
     format: spa::param::video::VideoInfoRaw,
     tx: mpsc::Sender<StreamMessage>,
-    encoder: Option<Encoder>,
+    encoder: Option<VideoEncoder>,
     frame: u64,
 }
 
-fn process_frame(stream: &pipewire::stream::StreamRef, user_data: &mut UserData) {
+fn process_frame(stream: &StreamRef, user_data: &mut UserData) {
     match stream.dequeue_buffer() {
         None => println!("out of buffers"),
         Some(mut buffer) => {
@@ -41,19 +41,10 @@ fn process_frame(stream: &pipewire::stream::StreamRef, user_data: &mut UserData)
                 return;
             };
 
-            let bgr_data = raw_data
-                .chunks_exact(4)
-                .flat_map(|chunk| [chunk[0], chunk[1], chunk[2]]) // Drop x
-                .collect::<Vec<_>>();
-
             // Encode frame
-            let encoder = user_data.encoder.as_mut().expect("encoder unavailable");
+            let mut encoder = user_data.encoder.as_mut().expect("encoder unavailable");
 
-            let image = Image::bgr(encoder.width(), encoder.height(), &bgr_data); // faking the x part as alpha channel because BGRx isn't supported by x264
-            let (encoded_data, _) = encoder
-                .encode(user_data.frame.try_into().unwrap(), image)
-                .unwrap();
-            let encoded_data_vec = Vec::from(encoded_data.entirety());
+            let encoded_data = encoder.encode(raw_data).expect("failed to encode frame");
 
             // Update frame counter
             user_data.frame += 1;
@@ -65,7 +56,7 @@ fn process_frame(stream: &pipewire::stream::StreamRef, user_data: &mut UserData)
                 tx_cloned
                     .send(StreamMessage::Frame {
                         count: frame_cloned,
-                        data: encoded_data_vec,
+                        data: encoded_data,
                     })
                     .await
                     .unwrap();
@@ -74,12 +65,7 @@ fn process_frame(stream: &pipewire::stream::StreamRef, user_data: &mut UserData)
     }
 }
 
-fn param_changed(
-    _: &pipewire::stream::StreamRef,
-    user_data: &mut UserData,
-    id: u32,
-    param: Option<&Pod>,
-) {
+fn param_changed(_: &StreamRef, user_data: &mut UserData, id: u32, param: Option<&Pod>) {
     let Some(param) = param else {
         return;
     };
@@ -121,21 +107,11 @@ fn param_changed(
         video_format.framerate().denom
     );
 
-    // Initialize the encoder
-    let mut enc = Encoder::builder()
-        .fps(30, 1)
-        // .baseline()
-        // FIXME: hardcoded colorspace
-        .build(
-            Colorspace::BGR,
-            video_format.size().width.try_into().unwrap(),
-            video_format.size().height.try_into().unwrap(),
-        )
-        .unwrap();
+    let enc = VideoEncoder::new(video_format.size().width, video_format.size().height, 30)
+        .expect("failed to init video encoder");
 
     // Gen headers
-    let headers = enc.headers().unwrap();
-    let headers_data = Vec::from(headers.entirety());
+    let headers_data = enc.headers();
 
     // Assign into UserData
     user_data.encoder = Some(enc);

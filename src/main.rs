@@ -3,6 +3,7 @@ use std::os::fd::IntoRawFd;
 use tokio::{join, sync::mpsc};
 
 mod adb;
+mod encoder;
 mod message;
 mod pipewire;
 mod portal;
