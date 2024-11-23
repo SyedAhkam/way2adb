@@ -17,6 +17,142 @@ struct UserData {
     frame: u64,
 }
 
+fn process_frame(stream: &pipewire::stream::StreamRef, user_data: &mut UserData) {
+    match stream.dequeue_buffer() {
+        None => println!("out of buffers"),
+        Some(mut buffer) => {
+            let datas = buffer.datas_mut();
+            if datas.is_empty() {
+                return;
+            }
+
+            // copy frame data to screen
+            let data = &mut datas[0];
+            let chunk = data.chunk();
+            // println!("got a frame of size {}", chunk.size());
+
+            let raw_data = match data.data() {
+                Some(data) => data,
+                None => return,
+            };
+
+            if user_data.format.format() != VideoFormat::BGRx {
+                eprintln!("unsupported pixel format: {:?}", user_data.format.format());
+                return;
+            };
+
+            let bgr_data = raw_data
+                .chunks_exact(4)
+                .flat_map(|chunk| [chunk[0], chunk[1], chunk[2]]) // Drop x
+                .collect::<Vec<_>>();
+
+            // Encode frame
+            let encoder = user_data.encoder.as_mut().expect("encoder unavailable");
+
+            let image = Image::bgr(encoder.width(), encoder.height(), &bgr_data); // faking the x part as alpha channel because BGRx isn't supported by x264
+            let (encoded_data, _) = encoder
+                .encode(user_data.frame.try_into().unwrap(), image)
+                .unwrap();
+            let encoded_data_vec = Vec::from(encoded_data.entirety());
+
+            // Update frame counter
+            user_data.frame += 1;
+
+            // Send frame to server
+            let tx_cloned = user_data.tx.clone();
+            let frame_cloned = user_data.frame.clone();
+            tokio::spawn(async move {
+                tx_cloned
+                    .send(StreamMessage::Frame {
+                        count: frame_cloned,
+                        data: encoded_data_vec,
+                    })
+                    .await
+                    .unwrap();
+            });
+        }
+    }
+}
+
+fn param_changed(
+    _: &pipewire::stream::StreamRef,
+    user_data: &mut UserData,
+    id: u32,
+    param: Option<&Pod>,
+) {
+    let Some(param) = param else {
+        return;
+    };
+    if id != pw::spa::param::ParamType::Format.as_raw() {
+        return;
+    }
+
+    let (media_type, media_subtype) = match pw::spa::param::format_utils::parse_format(param) {
+        Ok(v) => v,
+        Err(_) => return,
+    };
+
+    if media_type != pw::spa::param::format::MediaType::Video
+        || media_subtype != pw::spa::param::format::MediaSubtype::Raw
+    {
+        return;
+    }
+
+    user_data
+        .format
+        .parse(param)
+        .expect("Failed to parse param changed to VideoInfoRaw");
+
+    println!("got video format:");
+    let video_format = user_data.format;
+    println!(
+        "  format: {} ({:?})",
+        video_format.format().as_raw(),
+        video_format.format()
+    );
+    println!(
+        "  size: {}x{}",
+        video_format.size().width,
+        video_format.size().height
+    );
+    println!(
+        "  framerate: {}/{}",
+        video_format.framerate().num,
+        video_format.framerate().denom
+    );
+
+    // Initialize the encoder
+    let mut enc = Encoder::builder()
+        .fps(30, 1)
+        // .baseline()
+        // FIXME: hardcoded colorspace
+        .build(
+            Colorspace::BGR,
+            video_format.size().width.try_into().unwrap(),
+            video_format.size().height.try_into().unwrap(),
+        )
+        .unwrap();
+
+    // Gen headers
+    let headers = enc.headers().unwrap();
+    let headers_data = Vec::from(headers.entirety());
+
+    // Assign into UserData
+    user_data.encoder = Some(enc);
+
+    // Init message
+    let tx_cloned = user_data.tx.clone();
+    tokio::spawn(async move {
+        tokio::time::sleep(tokio::time::Duration::from_millis(1000)); // gotta wait for server to be ready
+
+        tx_cloned.send(StreamMessage::Ready).await.unwrap();
+        tx_cloned
+            .send(StreamMessage::Header(headers_data))
+            .await
+            .unwrap();
+    });
+}
+
 pub async fn start_streaming(
     node_id: u32,
     fd: OwnedFd,
@@ -50,136 +186,8 @@ pub async fn start_streaming(
         .state_changed(|_, _, old, new| {
             println!("State changed: {:?} -> {:?}", old, new);
         })
-        .param_changed(|_, user_data, id, param| {
-            let Some(param) = param else {
-                return;
-            };
-            if id != pw::spa::param::ParamType::Format.as_raw() {
-                return;
-            }
-
-            let (media_type, media_subtype) =
-                match pw::spa::param::format_utils::parse_format(param) {
-                    Ok(v) => v,
-                    Err(_) => return,
-                };
-
-            if media_type != pw::spa::param::format::MediaType::Video
-                || media_subtype != pw::spa::param::format::MediaSubtype::Raw
-            {
-                return;
-            }
-
-            user_data
-                .format
-                .parse(param)
-                .expect("Failed to parse param changed to VideoInfoRaw");
-
-            println!("got video format:");
-            let video_format = user_data.format;
-            println!(
-                "  format: {} ({:?})",
-                video_format.format().as_raw(),
-                video_format.format()
-            );
-            println!(
-                "  size: {}x{}",
-                video_format.size().width,
-                video_format.size().height
-            );
-            println!(
-                "  framerate: {}/{}",
-                video_format.framerate().num,
-                video_format.framerate().denom
-            );
-
-            // Initialize the encoder
-            let mut enc = Encoder::builder()
-                .fps(30, 1)
-                // .baseline()
-                // FIXME: hardcoded colorspace
-                .build(
-                    Colorspace::BGR,
-                    video_format.size().width.try_into().unwrap(),
-                    video_format.size().height.try_into().unwrap(),
-                )
-                .unwrap();
-
-            // Gen headers
-            let headers = enc.headers().unwrap();
-            let headers_data = Vec::from(headers.entirety());
-
-            // Assign into UserData
-            user_data.encoder = Some(enc);
-
-            // Init message
-            let tx_cloned = user_data.tx.clone();
-            tokio::spawn(async move {
-                tokio::time::sleep(tokio::time::Duration::from_millis(1000)); // gotta wait for server to be ready
-
-                tx_cloned.send(StreamMessage::Ready).await.unwrap();
-                tx_cloned
-                    .send(StreamMessage::Header(headers_data))
-                    .await
-                    .unwrap();
-            });
-        })
-        .process(|stream, user_data| {
-            match stream.dequeue_buffer() {
-                None => println!("out of buffers"),
-                Some(mut buffer) => {
-                    let datas = buffer.datas_mut();
-                    if datas.is_empty() {
-                        return;
-                    }
-
-                    // copy frame data to screen
-                    let data = &mut datas[0];
-                    let chunk = data.chunk();
-                    // println!("got a frame of size {}", chunk.size());
-
-                    let raw_data = match data.data() {
-                        Some(data) => data,
-                        None => return,
-                    };
-
-                    if user_data.format.format() != VideoFormat::BGRx {
-                        eprintln!("unsupported pixel format: {:?}", user_data.format.format());
-                        return;
-                    };
-
-                    let bgr_data = raw_data
-                        .chunks_exact(4)
-                        .flat_map(|chunk| [chunk[0], chunk[1], chunk[2]]) // Drop x
-                        .collect::<Vec<_>>();
-
-                    // Encode frame
-                    let encoder = user_data.encoder.as_mut().expect("encoder unavailable");
-
-                    let image = Image::bgr(encoder.width(), encoder.height(), &bgr_data); // faking the x part as alpha channel because BGRx isn't supported by x264
-                    let (encoded_data, _) = encoder
-                        .encode(user_data.frame.try_into().unwrap(), image)
-                        .unwrap();
-                    let encoded_data_vec = Vec::from(encoded_data.entirety());
-
-                    // Update frame counter
-                    user_data.frame += 1;
-
-                    // Send frame to server
-                    let tx_cloned = user_data.tx.clone();
-                    let frame_cloned = user_data.frame.clone();
-                    tokio::spawn(async move {
-                        tx_cloned
-                            .send(StreamMessage::Frame {
-                                count: frame_cloned,
-                                data: encoded_data_vec,
-                            })
-                            .await
-                            .unwrap();
-                    });
-                }
-            }
-        })
+        .param_changed(param_changed)
+        .process(process_frame)
         .register()?;
 
     println!("Created stream {:#?}", stream);
