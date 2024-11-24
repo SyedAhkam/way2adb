@@ -29,10 +29,16 @@ impl VideoEncoder {
         // encoder.set_flags(codec::Flags::GLOBAL_HEADER);
 
         let mut opts = Dictionary::new();
-        opts.set("preset", "medium");
+        opts.set("preset", "veryfast");
         opts.set("tune", "zerolatency");
-        opts.set("x264-params", "nal-hrd=cbr");
-        opts.set("crf", "23");
+        opts.set("bitrate", "1000");
+        opts.set("keyint", "30");
+        opts.set(
+            "x264-params",
+            "nal-hrd=cbr:vbv-maxrate=1000:vbv-bufsize=1000",
+        );
+        opts.set("annexb", "1");
+        opts.set("bframes", "0");
 
         let encoder = encoder.open_with(opts)?;
 
